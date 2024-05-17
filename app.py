@@ -1,131 +1,73 @@
-import cv2
 import streamlit as st
-import numpy as np
-from cvzone.HandTrackingModule import HandDetector
-from cvzone.SelfiSegmentationModule import SelfiSegmentation
-from time import sleep
+import pickle
+import pandas as pd
+import requests
 
 
-def run_virtual_keyboard():
-    # Use this line to capture video from the webcam
-    cap = cv2.VideoCapture(0)
-
-    # Set dimensions for the displayed video
-    cap.set(3, 1280)
-    cap.set(4, 720)
-    detector = HandDetector(detectionCon=0.8)
-    finalText = ''
-
-    keys = [["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-            ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
-            ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"]]
-
-    class Button():
-        def __init__(self, pos, text, size=[100, 100]):
-            self.pos = pos
-            self.size = size
-            self.text = text
-
-    stop_button_pressed = False
-
-    while cap.isOpened() and not stop_button_pressed:
-        ret, img = cap.read()
-
-        if not ret:
-            st.write("The video capture has ended.")
-            break
-
-        imgOut = segmentor.removeBG(img, imgList[indexImg])
-
-        hands, img = detector.findHands(imgOut)
-
-        keyboard_canvas = np.zeros_like(img)
-        buttonList = []
-
-        for key in keys[0]:
-            buttonList.append(Button([30 + keys[0].index(key) * 105, 30], key))
-
-        for key in keys[1]:
-            buttonList.append(Button([30 + keys[1].index(key) * 105, 150], key))
-
-        for key in keys[2]:
-            buttonList.append(Button([30 + keys[2].index(key) * 105, 260], key))
-
-        buttonList.append(Button([90 + 10 * 100, 30], 'BS', size=[125, 100]))
-        buttonList.append(Button([300, 370], 'SPACE', size=[500, 100]))
-
-        if hands:
-            hand = hands[0]
-            lmList = hand["lmList"]
-            if lmList:
-                for button in buttonList:
-                    x, y = button.pos
-                    w, h = button.size
-
-                    if x < lmList[8][0] < x + w and y < lmList[8][1] < y + h:
-                        cv2.rectangle(img, button.pos, [button.pos[0] + button.size[0], button.pos[1] + button.size[1]],
-                                      (0, 255, 160), -1)
-                        cv2.putText(img, button.text, (button.pos[0] + 20, button.pos[1] + 70), cv2.FONT_HERSHEY_PLAIN,
-                                    5, (255, 255, 255), 3)
-
-                        l, _, _ = detector.findDistance(lmList[4][0:2], lmList[8][0:2], img, scale=0)
-
-                        if l < 30:
-                            cv2.rectangle(img, button.pos,
-                                          [button.pos[0] + button.size[0], button.pos[1] + button.size[1]],
-                                          (9, 9, 179), -1)
-                            cv2.putText(img, button.text, (button.pos[0] + 20, button.pos[1] + 70),
-                                        cv2.FONT_HERSHEY_PLAIN,
-                                        5, (255, 255, 255), 3)
-                            if button.text != 'BS' and button.text != 'SPACE':
-                                finalText += button.text
-                                textList = list(finalText)
-                            elif button.text != 'SPACE':
-                                if len(textList) != 0:
-                                    textList.pop()
-                                    text = ''
-                                    finalText = text.join(textList)
-                            else:
-                                finalText += " "
-                            sleep(0.25)
-
-        cv2.putText(img, finalText, (120, 580), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 5)
-
-        stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
-
-        # Convert the frame from BGR to RGB format
-        stacked_img = cv2.cvtColor(stacked_img, cv2.COLOR_BGR2RGB)
-
-        # Display the frame using Streamlit's st.image
-        st.image(stacked_img, channels="RGB")
-
-        # Break the loop if the 'q' key is pressed or the user clicks the "Stop" button
-        if stop_button_pressed:
-            break
-
-        key = cv2.waitKey(1)
-
-        if key == ord('a'):
-            if indexImg > 0:
-                indexImg -= 1
-        elif key == ord('d'):
-            if indexImg < len(imgList) - 1:
-                indexImg += 1
-        elif key == ord('q'):
-            break
-
-    # After the loop release the cap object
-    cap.release()
-    # Destroy all the windows
-    cv2.destroyAllWindows()
+def fetch_poster(movie_id):
+    try:
+        url = f'https://api.themoviedb.org/3/movie/{movie_id}?api_key=b1b525407ba93289541d85781a9a9bae'
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            poster_path = data.get('poster_path')
+            if poster_path:
+                full_path = "https://image.tmdb.org/t/p/w500/" + poster_path
+                return full_path
+            else:
+                return "Poster path not available"
+        else:
+            return "Failed to fetch data"
+    except Exception as e:
+        print(f"Error fetching poster: {str(e)}")
+        return "Error fetching poster"
 
 
-# Set the title for the Streamlit app
-st.title("AI Virtual Keyboard")
+def recommend(movie):
+    movie_index = movies[movies['title'] == movie].index[0]
+    distances = similarity[movie_index]
+    movies_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
+    recommended_movies = []
+    recommended_movies_posters = []
 
-# Add a "Stop" button and store its state in a variable
-stop_button_pressed = st.button("Stop")
+    for i in movies_list:
+        movie_id = movies.iloc[i[0]]['movie_id']
+        recommended_movies.append(movies.iloc[i[0]]['title'])
+        recommended_movies_posters.append(fetch_poster(movie_id))
 
-# Run the virtual keyboard
-run_virtual_keyboard()
+    return recommended_movies, recommended_movies_posters
 
+
+# Load data
+movies_list = pickle.load(open('movies.pkl', 'rb'))
+movies = pd.DataFrame(movies_list)
+similarity = pickle.load(open('similarity.pkl', 'rb'))
+
+movies_list = movies['title'].values
+
+st.header("Movie Recommender System")
+selected_movie_name = st.selectbox('Which movie do you like to watch🎬?', movies_list)
+
+if st.button('Show Recommendation'):
+    recommended_movie_names,recommended_movie_posters = recommend(selected_movie_name)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.text(recommended_movie_names[0])
+        st.image(recommended_movie_posters[0])
+    with col2:
+        st.text(recommended_movie_names[1])
+        st.image(recommended_movie_posters[1])
+
+    with col3:
+        st.text(recommended_movie_names[2])
+        st.image(recommended_movie_posters[2])
+    with col4:
+        st.text(recommended_movie_names[3])
+        st.image(recommended_movie_posters[3])
+    with col5:
+        st.text(recommended_movie_names[4])
+        st.image(recommended_movie_posters[4])
+
+# Add a footer
+st.markdown("---")
+st.write("©️ 2023 Movie Recommender by Pratyush Jain")
